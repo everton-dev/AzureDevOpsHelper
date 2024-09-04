@@ -1,0 +1,115 @@
+name: Deploy_Function_App_$(Date:yyyyMMdd)$(Rev:.r)
+
+parameters:
+  - name: ProjectFolderPath
+    type: string
+    default: '<your-project-folder-path>'
+  - name: FunctionName
+    type: string
+    default: '<your-project-folder-path>'
+
+pool:
+  vmImage: 'windows-latest'
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - /Path/Of/Your/Folder/In/Git
+
+resources:
+  repositories:
+    - repository: mainRepo
+      type: git
+      name: YourRepositoryInGit
+      ref: refs/heads/main
+
+stages:
+  - stages: Build
+
+steps:
+  jobs:
+  - deployment: Build
+    environment: Develop
+    pool:
+      name: 'Azure Pipelines'
+      vmImage: 'windows-latest'
+    continueOnError: false
+    workspace:
+      clear: all
+    
+    strategy:
+     runOnce:
+      deploy:
+       steps:
+
+        - checkout: self
+          path: s/YourRepositoryName
+          condition: ne(variable['Build.SourceBranch'], 'refs/heads/main')
+        
+        - checkout: mainRepo
+          path: s/YourRepositoryName
+          condition: eq(variable['Build.SourceBranch'], 'refs/heads/main')
+
+        - task: DotNetCoreCLI@2
+          displayName: 'dotnet resore'
+          inputs:
+            command: restore
+            projects: '${{ parameters.ProjectFolderPath }}'
+        
+        - task: DotNetCoreCLI@2
+          displayName: 'dotnet build'
+          inputs:
+            command: build
+            projects: '${{ parameters.ProjectFolderPath }}'
+            arguments: '--no-restore --configuration Release'
+
+        - task: DotNetCoreCLI@2
+          displayName: 'dotnet publish'
+          inputs:
+            command: publish
+            projects: '${{ parameters.ProjectFolderPath }}'
+            publishWebProjects: false
+            modifyOutputPath: false
+            zipAfterPublish: false
+            arguments: '
+              --no-restore
+              --configuration Release 
+              --output $(Build.ArtifactStagingDirectory)/FunctionApp'
+
+        - task: PublishBuildArtifacts@1
+          displayName: 'Publish Artifact'
+          inputs:
+            ArtifactName: 'package-release'
+            targetPath: '$(Build.ArtifactStagingDirectory)'
+  
+  - deployment: Deploy
+    environment: Develop
+    dependsOn: Build
+    workspace:
+      clear: all
+    pool:
+      name: 'Azure Pipelines'
+      vmImage: 'windows-latest'
+    
+    strategy:
+     runOnce:
+      deploy:
+       steps:
+
+        - download: current
+          artifact: 'package-release'
+        
+        - task: AzureCLI@2
+          displayName: 'Deploy Function App'
+          inputs:
+            azureSubscription: SubscriptionName
+            scriptType: ps
+            scriptionLocation: inlineScript
+            inlineScript: |
+              az functionapp deployment source config-zip `
+                -g $(ResourceGoupName) `
+                -n ${{ parameters.FunctionName }} `
+                --src '$(Pipeline.Workspace)/package-release/FunctionApp.zip'
