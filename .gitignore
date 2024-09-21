@@ -1,0 +1,3 @@
+docker/sql-server/versions/developer/data/
+docker/sql-server/versions/developer/log/
+docker/sql-server/versions/developer/secrets/
